@@ -1,0 +1,60 @@
+# ============================================================
+# Docker Compose — Jenkins CI stack for embedded-devops-demo
+# ============================================================
+#
+# Services
+# --------
+#   jenkins  — Custom Jenkins LTS with Docker CLI pre-installed
+#
+# Volumes
+# -------
+#   tbox-jenkins-data  — Named volume; persists Jenkins home across restarts
+#                        (jobs, credentials, build history, plugin config)
+#
+# Networking
+# ----------
+#   /var/run/docker.sock  — Shared with the Jenkins container so Jenkins
+#   can call `docker build` / `docker run` on the HOST Docker engine.
+#
+# Usage
+# -----
+#   Start  : docker compose up -d --build
+#   Stop   : docker compose stop
+#   Destroy: docker compose down            (keeps volume)
+#   Reset  : docker compose down -v         (removes volume — wipes Jenkins data)
+#   Logs   : docker compose logs -f jenkins
+# ============================================================
+
+services:
+  jenkins:
+    build:
+      context: ./jenkins
+      dockerfile: Dockerfile
+    image: tbox-jenkins:latest
+    container_name: tbox-jenkins
+    ports:
+      - "8090:8080"   # Jenkins web UI  → http://localhost:8090
+      - "50000:50000"  # Jenkins agent TCP port (for future remote agents)
+    volumes:
+      # Named volume: persists all Jenkins data (jobs, plugins, credentials, history)
+      - jenkins_home:/var/jenkins_home
+      # Docker socket: allows Jenkins to invoke docker commands on the host engine
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Set to 'false' to skip the setup wizard (useful for fully automated setups)
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=true
+    # Run the container as root so the Docker socket is accessible.
+    # The jenkins.sh entrypoint inside the official image handles privilege
+    # separation; Jenkins itself still runs under the jenkins UID.
+    user: root
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/login || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  jenkins_home:
+    name: tbox-jenkins-data

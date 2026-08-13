@@ -1,0 +1,22 @@
+# Keep the Docker build context lean.
+# The project root is mounted at runtime, not COPYed, so this file
+# primarily protects against accidental COPY instructions in future
+# Dockerfile stages picking up stale artefacts.
+
+# CMake build output
+build/
+cmake-build-*/
+out/
+
+# IDE and editor directories
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS-generated junk
+.DS_Store
+Thumbs.db
+
+# Git internals (not needed in the image)
+.git/

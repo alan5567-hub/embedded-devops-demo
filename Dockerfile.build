@@ -1,0 +1,43 @@
+# ============================================================
+# Dockerfile.build — T-Box Diagnostic Build Environment
+# ============================================================
+# Purpose  : Build the embedded-devops-demo C project without
+#            requiring any build tools on the host machine.
+# Base     : alpine:3.21 (tiny ~8 MB Linux image)
+# Mount    : Host project root -> /workspace  (read/write)
+# Output   : /workspace/build/  (visible on the host)
+# ============================================================
+
+FROM alpine:3.21
+
+LABEL maintainer="embedded-devops-demo"
+LABEL description="Lightweight C/CMake build environment for T-Box Diagnostic"
+
+# Install the full build toolchain in a single layer, then clear the cache
+RUN apk add --no-cache \
+        gcc \
+        g++ \
+        cmake \
+        make \
+        musl-dev
+
+# Confirm tool versions at image build time (useful for CI audit logs)
+RUN echo "=== Toolchain versions ===" \
+ && gcc     --version | head -1 \
+ && g++     --version | head -1 \
+ && cmake   --version | head -1 \
+ && make    --version | head -1 \
+ && echo "==========================="
+
+# The host project root is expected to be mounted here at runtime
+WORKDIR /workspace
+
+# ---------------------------------------------------------------
+# Default command: configure + compile the project.
+# The build directory is created inside /workspace so the output
+# is visible on the host under <project-root>/build/.
+# ---------------------------------------------------------------
+CMD ["sh", "-c", \
+     "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && \
+      cmake --build build --parallel $(nproc) && \
+      echo '' && echo '[Docker] Build finished. Executable: build/tbox_diagnostic'"]
