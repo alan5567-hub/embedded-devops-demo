@@ -23,6 +23,7 @@ int main(void)
     vehicle_print_telemetry(&telemetry);
 
     printf("\n[T-Box] Diagnostic cycle complete.\n\n");
+    vehicle_print_telemetry(&telemetry);
 
     return 0;
 }
