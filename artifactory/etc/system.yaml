@@ -1,0 +1,19 @@
+## ========================================================
+## Artifactory system.yaml
+## ========================================================
+## This file is mounted read-only into the Artifactory container
+## at /artifactory_extra_conf/system.yaml (or merged at startup).
+##
+## It explicitly configures the Derby embedded database for both
+## the main Artifactory service AND the Access microservice,
+## which does not inherit the JF_SHARED_DATABASE_TYPE env var
+## in all versions of the cpp-ce image.
+##
+## NO CREDENTIALS are stored in this file.
+## ========================================================
+
+configVersion: 1
+
+shared:
+  database:
+    type: derby
