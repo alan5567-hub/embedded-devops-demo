@@ -1,31 +1,57 @@
 # ============================================================
-# Docker Compose — Jenkins CI stack for embedded-devops-demo
+# Docker Compose — T-Box DevOps Stack
 # ============================================================
 #
 # Services
 # --------
-#   jenkins  — Custom Jenkins LTS with Docker CLI pre-installed
+#   jenkins      — Custom Jenkins LTS with Docker CLI pre-installed
+#   artifactory  — JFrog Artifactory CE for C/C++ (artifact repository)
+#
+# Network
+# -------
+#   tbox-devops-net  — Explicit bridge network shared by Jenkins and
+#   Artifactory. Jenkins pipeline sibling containers launched via
+#   'docker run' can join this network at runtime with:
+#     --network tbox-devops-net
+#   allowing them to resolve 'tbox-artifactory' by container name.
+#   Using an explicit name prevents breakage if the project directory
+#   is ever renamed (auto-generated Compose networks are name-sensitive).
 #
 # Volumes
 # -------
-#   tbox-jenkins-data  — Named volume; persists Jenkins home across restarts
-#                        (jobs, credentials, build history, plugin config)
+#   tbox-jenkins-data      — Jenkins home: jobs, credentials, plugins, history
+#   tbox-artifactory-data  — Artifactory home: repos, config, embedded DB, logs
 #
-# Networking
-# ----------
-#   /var/run/docker.sock  — Shared with the Jenkins container so Jenkins
-#   can call `docker build` / `docker run` on the HOST Docker engine.
+# Ports
+# -----
+#   8090 → Jenkins      http://localhost:8090
+#   8082 → Artifactory  http://localhost:8082  (JFrog Router / main UI + API)
+#   8081 → Artifactory  http://localhost:8081  (internal Artifactory service)
 #
 # Usage
 # -----
-#   Start  : docker compose up -d --build
+#   Start  : docker compose up -d
 #   Stop   : docker compose stop
-#   Destroy: docker compose down            (keeps volume)
-#   Reset  : docker compose down -v         (removes volume — wipes Jenkins data)
+#   Destroy: docker compose down            (keeps volumes)
+#   Reset  : docker compose down -v         (⚠️ removes ALL volumes — wipes data)
+#   Logs   : docker compose logs -f
 #   Logs   : docker compose logs -f jenkins
+#   Logs   : docker compose logs -f artifactory
 # ============================================================
 
+# Explicit bridge network — name is fixed regardless of project directory name.
+# Jenkins pipeline sibling containers launched by 'docker run' must pass
+# --network tbox-devops-net to reach tbox-artifactory by container name.
+networks:
+  tbox-devops-net:
+    name: tbox-devops-net
+    driver: bridge
+
 services:
+
+  # ----------------------------------------------------------
+  # Jenkins CI Server
+  # ----------------------------------------------------------
   jenkins:
     build:
       context: ./jenkins
@@ -33,7 +59,7 @@ services:
     image: tbox-jenkins:latest
     container_name: tbox-jenkins
     ports:
-      - "8090:8080"   # Jenkins web UI  → http://localhost:8090
+      - "8090:8080"    # Jenkins web UI  → http://localhost:8090
       - "50000:50000"  # Jenkins agent TCP port (for future remote agents)
     volumes:
       # Named volume: persists all Jenkins data (jobs, plugins, credentials, history)
@@ -41,12 +67,13 @@ services:
       # Docker socket: allows Jenkins to invoke docker commands on the host engine
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      # Set to 'false' to skip the setup wizard (useful for fully automated setups)
       - JAVA_OPTS=-Djenkins.install.runSetupWizard=true
     # Run the container as root so the Docker socket is accessible.
     # The jenkins.sh entrypoint inside the official image handles privilege
     # separation; Jenkins itself still runs under the jenkins UID.
     user: root
+    networks:
+      - tbox-devops-net
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/login || exit 1"]
@@ -55,6 +82,53 @@ services:
       retries: 5
       start_period: 60s
 
+  # ----------------------------------------------------------
+  # JFrog Artifactory CE for C/C++
+  # ----------------------------------------------------------
+  # Stores versioned build artifacts (binary files, Conan packages).
+  # For this project, build/tbox_diagnostic is uploaded here by
+  # the Jenkins Publish stage after a successful Build + Test.
+  #
+  # First boot takes 60-90 seconds while Artifactory initialises its
+  # embedded Derby database. Subsequent boots are much faster.
+  #
+  # Default credentials (change on first login):  admin / password
+  # ----------------------------------------------------------
+  artifactory:
+    # ⚠️  PINNED TO 7.63.14 — Do NOT change to 'latest'.
+    # From Artifactory 7.68 onward the Access microservice mandates PostgreSQL;
+    # Derby (the embedded DB) is no longer accepted. 7.63.x is the last release
+    # family where Derby works out-of-the-box, making it suitable for local
+    # learning environments that have no external database.
+    image: releases-docker.jfrog.io/jfrog/artifactory-cpp-ce:7.63.14
+    container_name: tbox-artifactory
+    ports:
+      - "8082:8082"    # JFrog Router (Web UI + REST API) → http://localhost:8082
+      - "8081:8081"    # Artifactory internal service port
+    volumes:
+      # Named volume: persists all Artifactory data across restarts
+      - artifactory_data:/var/opt/jfrog/artifactory
+    environment:
+      # Use the embedded Derby database — no external database required.
+      # Required explicitly so the startup scripts resolve the DB type early.
+      - JF_SHARED_DATABASE_TYPE=derby
+    networks:
+      - tbox-devops-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8082/artifactory/api/system/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s   # First boot is slow; give Artifactory time to initialise
+
+
 volumes:
+  # Jenkins home — preserves jobs, credentials, build history, and plugin config.
+  # This volume is NOT recreated when 'docker compose up' recreates the container.
   jenkins_home:
     name: tbox-jenkins-data
+
+  # Artifactory home — preserves all repositories and configuration.
+  artifactory_data:
+    name: tbox-artifactory-data
