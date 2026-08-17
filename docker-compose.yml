@@ -6,6 +6,7 @@
 # --------
 #   jenkins      — Custom Jenkins LTS with Docker CLI pre-installed
 #   artifactory  — JFrog Artifactory CE for C/C++ (artifact repository)
+#   cloudflared  — Cloudflare Quick Tunnel → exposes Jenkins externally (no account needed)
 #
 # Network
 # -------
@@ -27,6 +28,7 @@
 #   8090 → Jenkins      http://localhost:8090
 #   8082 → Artifactory  http://localhost:8082  (JFrog Router / main UI + API)
 #   8081 → Artifactory  http://localhost:8081  (internal Artifactory service)
+#   (cloudflared assigns a random *.trycloudflare.com URL — see container logs)
 #
 # Usage
 # -----
@@ -37,6 +39,7 @@
 #   Logs   : docker compose logs -f
 #   Logs   : docker compose logs -f jenkins
 #   Logs   : docker compose logs -f artifactory
+#   Logs   : docker compose logs -f cloudflared
 # ============================================================
 
 # Explicit bridge network — name is fixed regardless of project directory name.
@@ -120,7 +123,40 @@ services:
       interval: 30s
       timeout: 10s
       retries: 10
-      start_period: 120s   # First boot is slow; give Artifactory time to initialise
+      start_period: 120s   # First boot is slow; give Artifactory time to initialise 
+
+  # ----------------------------------------------------------
+  # Cloudflare Quick Tunnel
+  # ----------------------------------------------------------
+  # Requests a free, ephemeral *.trycloudflare.com URL with zero config:
+  #   - No Cloudflare account or login required
+  #   - No named tunnel, no credential file, no token
+  #   - URL is randomly generated each time the container starts
+  #
+  # The public URL is printed to the container log on startup:
+  #   docker compose logs -f cloudflared
+  # Look for a line like:
+  #   INF +------------------------------------------------------------------------------------+
+  #   INF |  Your quick Tunnel has been created! Visit it at:                                  |
+  #   INF |  https://<random-subdomain>.trycloudflare.com                                      |
+  #   INF +------------------------------------------------------------------------------------+
+  #
+  # This tunnel is temporary — the URL changes on every container restart.
+  # For a stable URL, a named Cloudflare Tunnel with an account token is needed.
+  # ----------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: tbox-cloudflared
+    # 'tunnel --no-autoupdate run --url' starts a Quick Tunnel without any
+    # account credentials. Traffic arriving at the trycloudflare.com URL is
+    # forwarded to http://jenkins:8080 inside the shared Docker network.
+    command: tunnel --no-autoupdate --url http://jenkins:8080
+    networks:
+      - tbox-devops-net
+    depends_on:
+      jenkins:
+        condition: service_healthy  # Wait until Jenkins passes its healthcheck
+    restart: unless-stopped
 
 
 volumes:
