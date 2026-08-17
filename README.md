@@ -2,7 +2,7 @@
 
 A minimal C project that simulates a **T-Box (Telematics Box) diagnostic system** — a component found in connected vehicles that reads and reports telemetry data.
 
-This project is designed as a hands-on starting point for learning **Git** and **DevOps** practices with a realistic embedded-systems flavour.
+This project is designed as a hands-on starting point for learning **Git**, **CI/CD**, and **DevOps** practices with a realistic embedded-systems flavour.
 
 ---
 
@@ -10,17 +10,20 @@ This project is designed as a hands-on starting point for learning **Git** and *
 
 ```
 embedded-devops-demo/
+├── artifactory/
+│   └── etc/system.yaml     # JFrog Artifactory configuration
 ├── jenkins/
 │   └── Dockerfile          # Custom Jenkins image (LTS + Docker CLI + plugins)
 ├── CMakeLists.txt          # Build configuration (CMake + CTest)
-├── docker-compose.yml      # Starts the Jenkins CI server
+├── docker-compose.yml      # Multi-service stack (Jenkins, JFrog Artifactory, Cloudflare Tunnel)
 ├── Dockerfile.build        # C build environment (Alpine + GCC + CMake)
-├── Jenkinsfile             # CI pipeline (Checkout → Build → Test)
+├── Jenkinsfile             # Declarative CI/CD pipeline (Checkout → Build → Test → Publish)
 ├── .dockerignore           # Keeps the Docker context lean
 ├── main.c                  # Entry point — drives the diagnostic cycle
 ├── vehicle.c               # Vehicle logic: init, simulation, status, printing
 ├── vehicle.h               # Public API declarations and data types
-├── .gitignore              # Ignores build artefacts, IDE files, and jenkins_home/
+├── .gitignore              # Ignores build artefacts, IDE files, and data volumes
+├── ARTIFACTORY.md          # Full JFrog Artifactory setup & publish guide
 ├── JENKINS.md              # Full Jenkins setup and operation guide
 └── README.md               # This file
 ```
@@ -149,55 +152,71 @@ docker run --rm -v ${PWD}:/workspace tbox-builder `
 
 ---
 
-## Jenkins CI (Local)
+## DevOps Stack (Jenkins, Artifactory & Cloudflare)
 
-> Full setup guide → **[JENKINS.md](./JENKINS.md)**
+The project includes a complete containerized DevOps stack defined in [`docker-compose.yml`](./docker-compose.yml):
 
-### Quick start
+- **Jenkins CI (`http://localhost:8090`)** — Custom LTS image with Docker CLI to build sibling containers.
+- **JFrog Artifactory (`http://localhost:8082`)** — C/C++ Community Edition artifact repository for versioned binary releases.
+- **Cloudflare Quick Tunnel (`cloudflared`)** — Ephemeral public ingress (`*.trycloudflare.com`) forwarding to Jenkins for GitHub webhook triggers without needing public IP configuration or port forwarding.
+
+> Detailed guides:
+> - **[JENKINS.md](./JENKINS.md)** — Jenkins configuration, Docker socket permissions, credentials, and job setup.
+> - **[ARTIFACTORY.md](./ARTIFACTORY.md)** — Repository creation, access tokens, and verification.
+
+### Quick Start
 
 ```powershell
-# 1. Build the Jenkins image and start the server
-docker compose up -d --build
+# 1. Start the complete stack
+docker compose up -d
 
-# 2. Get the initial admin password (first run only)
+# 2. Get the initial Jenkins admin password (first run only)
 docker exec tbox-jenkins cat /var/jenkins_home/secrets/initialAdminPassword
 
-# 3. Open the UI
-start http://localhost:8080
+# 3. Access Services
+# Jenkins UI:     http://localhost:8090
+# Artifactory UI: http://localhost:8082 (default: admin / password)
+
+# 4. View Cloudflare Quick Tunnel public URL (for GitHub Webhooks)
+docker compose logs cloudflared
 ```
 
-### Start / Stop
+### Stack Management
 
 ```powershell
-docker compose start   # resume a stopped Jenkins
-docker compose stop    # pause (data preserved in named volume)
-docker compose down    # remove container (data preserved)
-docker compose down -v # ⚠️ remove container AND data volume
+docker compose start         # Resume stopped containers
+docker compose stop          # Pause all containers (data preserved in named volumes)
+docker compose logs -f       # Stream all service logs
+docker compose down          # Remove containers and networks (data volumes preserved)
+docker compose down -v       # ⚠️ Remove containers AND wipe all persistent data volumes
 ```
 
-### Pipeline stages
+### CI/CD Pipeline Stages
+
+The Declarative Pipeline defined in [`Jenkinsfile`](./Jenkinsfile) executes on every push triggered via `githubPush()` or manual run:
 
 | Stage | What it does |
-|-------|-------------|
-| **Checkout** | Clones the GitHub repo into the Jenkins workspace |
-| **Build** | Builds `tbox-builder` image; compiles C project inside it |
-| **Test** | Runs CTest smoke test inside `tbox-builder` |
+|---|---|
+| **Checkout** | Clones/updates repository from GitHub into Jenkins workspace |
+| **Build** | Builds `tbox-builder` image; compiles C project inside sibling container using `--volumes-from` |
+| **Test** | Runs CTest smoke test suite inside `tbox-builder` |
+| **Publish** | Uploads compiled binary (`tbox_diagnostic`) to JFrog Artifactory via curl sibling container (`main` branch only) |
 
-GCC, CMake, and Make never touch the host — they run only inside the Alpine `tbox-builder` container, which is itself launched by Jenkins via the shared Docker socket.
+GCC, CMake, and Make never touch the host — they run inside Alpine sibling containers managed by Jenkins via the shared Docker socket.
 
 ---
 
 ## Learning Goals
 
-This project is intentionally small so you can focus on:
+This project is intentionally concise so you can focus on:
 
-- **Git basics** — `init`, `add`, `commit`, `branch`, `merge`
-- **CMake** — understanding a real build system
-- **CTest** — basic test infrastructure
-- **Docker** — reproducible, host-agnostic build environments
-- **Jenkins** — CI server, pipelines, Docker socket access, `Jenkinsfile`
-- **Modular C** — separating logic (`vehicle.c`) from the entry point (`main.c`)
-- **DevOps readiness** — the structure is ready to add SonarQube, JFrog, and more
+- **Git basics** — `init`, `add`, `commit`, `branch`, `merge`, and webhooks
+- **CMake & CTest** — understanding modern C build systems and automated smoke tests
+- **Docker Sibling Pattern** — running builds in isolated containers via `/var/run/docker.sock` and `--volumes-from`
+- **Jenkins Pipelines** — declarative pipelines, environment variables, credentials injection, and push triggers
+- **Artifact Management** — versioned binary publishing to JFrog Artifactory
+- **Ephemeral Ingress** — exposing local services for webhooks using Cloudflare Quick Tunnels
+- **Modular C** — clean separation of hardware/telemetry simulation (`vehicle.c`) from application entry point (`main.c`)
 
 ---
 
