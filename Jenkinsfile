@@ -34,6 +34,10 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '10'))  // Keep last 10 builds
     }
 
+    triggers {
+        githubPush()
+    }
+
     // ---- Pipeline-wide variables --------------------------------
     // Non-sensitive config only. Credentials are NEVER stored here;
     // the access token is injected at runtime by withCredentials().
